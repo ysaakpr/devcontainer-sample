@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "respot-backend-chart.fullname" . }}
+  labels:
+    {{- include "respot-backend-chart.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "respot-backend-chart.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "respot-backend-chart.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "respot-backend-chart.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.run.command }}
+          command: {{ toYaml .Values.run.command | nindent 12 }}
+          {{- end }}
+          {{- if .Values.run.args }}
+          args: {{ toYaml .Values.run.args | nindent 12}}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          envFrom:
+          {{- if .Values.envFrom -}}
+          {{- toYaml .Values.envFrom | nindent 10 }}  
+          {{- end }} 
+          env:
+          {{- if .Values.env -}}
+          {{- toYaml .Values.env | nindent 10 }}    
+          {{- end -}} 
+          {{ range .Values.secretEnv -}}
+          {{- $sec := default $.Values.secretEnvRef .secret -}}
+          - name: {{ .name }}
+            valueFrom:
+              secretKeyRef:
+                name: {{ $sec }}
+                key: {{ .key }}
+          {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+          {{- range $ind,$file :=  $.Values.files -}}
+          {{- if hasKey $file "secret" }}
+          - mountPath: {{$file.mountPath}}
+            name: {{ $file.secret.secretName }}-{{$ind}}
+            readOnly: true
+          {{- else }}
+          {{- if and (hasKey $file "contents") ( not (empty $file.contents )) }}
+          - name: {{ include "respot-backend-chart.fullname" $ }}-fcm-{{ $ind }}
+            mountPath: {{$file.mountPath}}
+            readOnly: true
+          {{- end -}}
+          {{- end -}}
+          {{- end }}
+          {{- with .Values.volumeMounts }}
+          {{- toYaml . | nindent 10 }}
+          {{- end }}
+      volumes:
+        {{- with .Values.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- range $ind,$file :=  $.Values.files -}}
+        {{- if hasKey $file "secret" }}
+        - name: {{ $file.secret.secretName }}-{{$ind}}
+          secret:
+            {{- toYaml $file.secret | nindent 12 }}
+        {{- else }}
+        {{- if and (hasKey $file "contents") ( not (empty $file.contents )) }}
+        - name: {{ include "respot-backend-chart.fullname" $ }}-fcm-{{ $ind }}
+          configMap:
+            name: {{ include "respot-backend-chart.fullname" $ }}-fcm-{{ $ind }}
+        {{- end -}}
+        {{- end -}}
+        {{- end }}
+      
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

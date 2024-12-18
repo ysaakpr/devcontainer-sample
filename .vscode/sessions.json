@@ -1,0 +1,54 @@
+{
+    "$schema": "https://cdn.statically.io/gh/nguyenngoclongdev/cdn/main/schema/v10/terminal-keeper.json",
+    "theme": "tribe",
+    "active": "default",
+    "activateOnStartup": true,
+    "keepExistingTerminals": false,
+    "sessions": {
+        "default": [
+            {
+                "name": "shell",
+                "autoExecuteCommands": true,
+                "icon": "person",
+                "color": "terminal.ansiGreen",
+                "commands": [
+                    "echo hello"
+                ]
+            },
+            {
+                "name": "server",
+                "autoExecuteCommands": true,
+                "icon": "person",
+                "color": "terminal.ansiGreen",
+                "commands": [
+                    "./run server"
+                ]
+            },
+            {
+                "name": "worker",
+                "autoExecuteCommands": true,
+                "icon": "person",
+                "color": "terminal.ansiGreen",
+                "commands": [
+                    "./run worker"
+                ]
+            },
+            [
+                {
+                    "name": "flower",
+                    "autoExecuteCommands": true,
+                    "commands": [
+                        "./run flower"
+                    ]
+                },
+                {
+                    "name": "beat",
+                    "autoExecuteCommands": true,
+                    "commands": [
+                        "./run beat"
+                    ]
+                }
+            ]
+        ]
+    }
+}

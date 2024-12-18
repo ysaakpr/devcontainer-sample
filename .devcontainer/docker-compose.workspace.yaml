@@ -1,0 +1,136 @@
+services:
+  app:
+    image: mcr.microsoft.com/devcontainers/python:3.12-bookworm
+    command: sleep infinity
+    user: root
+    ports:
+    - 3001:3001
+    - 5000:5000
+    - 3000:3000
+    networks:
+    - app-network
+    depends_on:
+    - db
+    # volumes:
+    #   # This is where VS Code should expect to find your project's source code and the value of "workspaceFolder" in .devcontainer/devcontainer.json
+    #   - ..:/workspace:cached
+    volumes:
+    - ${WORKSPACE_SOURCE:?}:${WORKSPACE_TARGET:?}
+
+  # mongodb:
+  #   image: mongo:8.0.4-noble
+  #   restart: always
+  #   ports:
+  #   - 27017:27017
+  #   networks:
+  #     - app-network
+  #   volumes:
+  #     - mongodb:/data/db
+
+  # mongo-express:
+  #   image: mongo-express
+  #   restart: always
+  #   ports:
+  #     - 8081:8081
+  #   networks:
+  #     - app-network
+  #   depends_on:
+  #     - mongodb
+  #   environment:
+  #     # ME_CONFIG_MONGODB_ADMINUSERNAME: root
+  #     # ME_CONFIG_MONGODB_ADMINPASSWORD: example
+  #     ME_CONFIG_MONGODB_URL: mongodb://mongodb:27017/
+  #     ME_CONFIG_BASICAUTH: false
+
+  db:
+    image: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /data/postgres
+      POSTGRES_DB: profiles
+    volumes:
+      - db:/data/postgres
+    ports:
+      - "5432:5432"
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -d postgres" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+  redis:
+    image: redis:latest
+    restart: always
+    ports:
+      - '6379:6379'
+    command: redis-server --loglevel notice --requirepass ${REDIS_PASSWORD}
+    networks:
+      - app-network  
+  postgresql:
+    environment:
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_USER: temporal
+      POSTGRES_DB: postgres12
+    image: postgres:${POSTGRESQL_VERSION}
+    networks:
+      - app-network
+    ports:
+      - "5433:5432"
+    volumes:
+      - /var/lib/postgresql/data
+  temporal:
+    depends_on:
+      - postgresql
+    environment:
+      - DB=postgres12
+      - DB_PORT=5433
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgresql
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    image: temporalio/auto-setup:${TEMPORAL_VERSION}
+    networks:
+      - app-network
+    ports:
+      - 7233:7233
+    volumes:
+      - ./dynamicconfig:/etc/temporal/config/dynamicconfig
+  temporal-admin-tools:
+    depends_on:
+      - temporal
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CLI_ADDRESS=temporal:7233
+    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
+    networks:
+      - app-network
+    stdin_open: true
+    tty: true
+  temporal-ui:
+    depends_on:
+      - temporal
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    image: temporalio/ui:${TEMPORAL_UI_VERSION}
+    networks:
+      - app-network
+    ports:
+      - 8080:8080
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  mongodb:
+  db:
+  # $WORKSPACE_SOURCE is "devcontainer-volume" when the workspace is in a
+  # volume, and devcontainer-volume is an alias for the actual external volume.
+  # In bind-mount workspaces, it's an empty, unused volume created by compose.
+  devcontainer-volume:
+    name: ${WORKSPACE_CONTAINER_VOLUME_SOURCE:-not-used-in-bind-mount-workspace}
+    external: ${WORKSPACE_IS_CONTAINER_VOLUME:?}

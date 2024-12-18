@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Check if an argument is provided
+if [ -z "$1" ]; then
+  echo "Usage: $0 <app_flavor>"
+  echo "Available app flavors: worker, server, flower"
+  exit 1
+fi
+
+# Assign the argument to a variable
+APP_FLAVOR=$1
+
+# Define actions based on the app flavor
+case $APP_FLAVOR in
+  worker)
+    echo "Starting the worker app..."
+    export $(grep -v '^#' .env | xargs -d '\n')
+    celery -A celery_worker.celery worker --loglevel=INFO -Q celery,default,high_priority,low_priority --concurrency=4 -n worker1@%h
+    ;;
+  server)
+    echo "Starting the server app..."
+    # Add your server app command here
+    export $(grep -v '^#' .env | xargs -d '\n')
+    FLASK_APP=app FLASK_ENV=development flask run
+    ;;
+  flower)
+    echo "Starting the Flower UI app..."
+    export $(grep -v '^#' .env | xargs -d '\n')
+    celery -A celery_worker.celery flower -l info --port=9400
+    ;;
+  beat)
+    echo "Starting the Celery beat"
+    export $(grep -v '^#' .env | xargs -d '\n')
+    celery -A celery_worker.celery beat -l info
+    ;;
+  *)
+    echo "Invalid app flavor: $APP_FLAVOR"
+    echo "Available app flavors: worker, server, ui"
+    exit 1
+    ;;
+esac
+
+# End of script

@@ -1,0 +1,29 @@
+{{- if and .Values.gateway  .Values.gateway.enabled -}}
+{{ $svc := include "respot-backend-chart.fullname" .}}
+{{- range $ind,$value := .Values.gateway.mappings }}
+{{- $pind := add1 $ind -}}
+{{- if hasKey $value "hostSelector" -}}
+{{- $hostLabel := default "defaultapi" $value.hostSelector -}}
+{{- else -}}
+{{- fail "value for gateway.hostSelector is not as expected" }}
+{{- end -}}
+{{- $port := dig "xUpstream" "port" $.Values.service.port $value -}}
+{{- $xsvc := dig "xUpstream" "service" $svc $value -}}
+{{- $newmapping := omit $value "xUpstream" "hostSelector" -}}
+{{- if empty $newmapping -}}
+{{- fail "value for gateway  have empty mapping configurations" }}
+{{- end }}
+---
+apiVersion: getambassador.io/v3alpha1
+kind: Mapping
+metadata:
+  name: {{ include "respot-backend-chart.fullname" $ }}-{{ $pind }}
+  labels:
+    {{- include "respot-backend-chart.labels" $ | nindent 4 }}
+    host: {{ default "default-host" $value.hostSelector }}
+spec:
+    service: {{$xsvc}}:{{$port}}
+    {{- toYaml $newmapping | nindent 4}}
+
+{{- end -}}
+{{- end -}}
