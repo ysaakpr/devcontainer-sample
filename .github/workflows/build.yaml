@@ -1,0 +1,125 @@
+name: ci
+env:
+  APP_NAME: ${{ github.event.repository.name }}
+  CHART_NAME: ${{ github.event.repository.name }}
+on:
+  push:
+    branches:
+    #  - build
+    #  - master
+    #  - staging
+
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: read  # This is required for actions/checkout
+
+jobs:
+  build:
+    name: Build Image
+    runs-on: self-hosted
+    # runs-on: self-hosted #ubuntu-latest
+    # runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.output.outputs.VERSION }}
+      BUILD_IMAGE_WITH_TAG: ${{ steps.output.outputs.BUILD_IMAGE_WITH_TAG }}
+      HELM_CHART_TAG: ${{ steps.output.outputs.HELM_CHART_TAG }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4 # More information on this action can be found below in the 'AWS Credentials' section
+        with:
+          role-to-assume: arn:aws:iam::975050034894:role/GithubActionRunner
+          aws-region: ap-south-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Versioning
+        id: version
+        run: |
+          calculatedSha=$(git rev-parse --short ${{ github.sha }})
+          echo "VERSION=$calculatedSha" >> $GITHUB_ENV
+          echo "REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
+          echo "BUILD_IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/${{ env.APP_NAME }}" >> $GITHUB_ENV
+          echo "BUILD_IMAGE_WITH_TAG=${{ steps.login-ecr.outputs.registry }}/${{ env.APP_NAME }}:$calculatedSha" >> $GITHUB_ENV
+
+      # - name: Confirm git commit SHA output
+      #   run: echo ${{ env.COMMIT_SHORT_SHA }}
+
+      - name: Create AWS ECR repository
+        uses: uspacy/aws-ecr-action@v1
+        with:
+          repositoryName: ${{ env.APP_NAME }}
+      
+      # - name: Create AWS ECR repository
+      #   uses: uspacy/aws-ecr-action@v1
+      #   with:
+      #     repositoryName: ${{ env.APP_NAME }}-chart
+      
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{env.BUILD_IMAGE_WITH_TAG}}
+      - uses: azure/setup-helm@v4.2.0
+        with:
+          version: 'v3.16.3' # default is latest (stable)
+      - name: Package and push helm chart to Amazon ECR
+        id: helmpackage
+        env:
+          CHARTPATH: ${{env.CHART_PATH || 'helmchart'}}
+        run: |
+          cd ${{env.CHARTPATH}}
+          IMAGEURL=$(printf '%s\n' "${{env.BUILD_IMAGE_URI}}" | sed -e 's/[]\/$*.^[]/\\&/g');
+          VERSION=$(printf '%s\n' "${{env.VERSION}}" | sed -e 's/[]\/$*.^[]/\\&/g');
+          CHART_VERSION=$(helm show chart . | grep version | sed -e "s/^version: //")-$VERSION
+          echo "ImageURL: $IMAGEURL"
+          echo "App Version: $VERSION"
+          echo "Chart version: $CHART_VERSION"
+
+          CHART=${{env.CHART_NAME}}-$CHART_VERSION
+          sed -i  's/\@repository\@/'"$IMAGEURL"'/g' values.yaml
+          sed -i  's/\@version\@/'"$VERSION"'/g' values.yaml
+          cat values.yaml
+
+          cd ..
+          helm package ${{env.CHARTPATH}} --app-version $VERSION --version $CHART_VERSION
+          helm push $CHART.tgz oci://$REGISTRY
+          echo "HELM_CHART_TAG=$CHART" >> $GITHUB_ENV
+      - name: Generate output
+        id: output
+        run: |
+          echo "HELM_CHART_TAG=${{env.HELM_CHART_TAG}}" >> $GITHUB_OUTPUT
+          echo "VERSION=${{env.VERSION}}" >> $GITHUB_OUTPUT
+          echo "BUILD_IMAGE_WITH_TAG=${{env.BUILD_IMAGE_WITH_TAG}}" >> $GITHUB_OUTPUT
+  summary:
+    name: Artifacts
+    # runs-on: ubuntu-latest
+    runs-on: self-hosted
+    needs: [build]
+    env:
+          VERSION: ${{needs.build.outputs.VERSION}}
+          IMAGEURL: ${{needs.build.outputs.BUILD_IMAGE_WITH_TAG}}
+          CHARTVERSION: ${{needs.build.outputs.BUILD_IMAGE_WITH_TAG}}
+    steps:
+      # - if: always()
+      #   run: |
+      #     echo '### ${{ env.APP_NAME }} Build Summary ' >> $GITHUB_STEP_SUMMARY
+      - if:  ${{ always() && contains(needs.*.result, 'failure') }}
+        run: |
+          echo 'Build failed. ' >> $GITHUB_STEP_SUMMARY
+      - if:  ${{ always() && (needs.build.result == 'success') }}
+        run: |
+          echo '## :rocket: Build Success. :rocket:' >> $GITHUB_STEP_SUMMARY
+          echo "App name: ${{ env.APP_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "Version: $VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "ImageURI: $IMAGEURL" >> $GITHUB_STEP_SUMMARY
+          echo "ChartVersion: $CHARTVERSION" >> $GITHUB_STEP_SUMMARY
